@@ -2,6 +2,8 @@ package stepDefinitions;
 
 import com.microsoft.playwright.*;
 import io.cucumber.java.en.*;
+import org.junit.Assert;
+
 import java.util.*;
 
 public class ScraperSteps {
@@ -17,6 +19,11 @@ public class ScraperSteps {
         browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(false));
         page = browser.newPage();
         page.navigate("https://www.myntra.com");
+
+
+        // Assertion: Check if Myntra homepage loaded successfully
+        Assert.assertTrue("Myntra homepage not loaded!", page.title().contains("Myntra"));
+
     }
 
     @When("I navigate to Men's T-Shirts category")
@@ -24,15 +31,33 @@ public class ScraperSteps {
 //        page.waitForSelector("[data-reactid='20']");
         page.locator("[data-reactid='20']").hover();
         page.locator("text=T-Shirts").nth(0).click();
+
+        // Assertion: Verify page navigation to T-Shirts category
+        Assert.assertTrue("Failed to navigate to T-Shirts category!",
+                page.url().contains("men-tshirts"));
     }
 
     @And("I apply the brand filter {string}")
     public void applyBrandFilter(String brand) {
 //        page.locator("input[value='" + brand + "']").click();
         page.locator(".filter-search-filterSearchBox").nth(0).click();
-        page.locator(".filter-search-inputBox").nth(0).fill("Van Heusen");
+        page.locator(".filter-search-inputBox").nth(0).fill(brand);
         page.keyboard().press("Enter");
-        page.locator(".vertical-filters-label >> text=Van Heusen").nth(0).click();
+
+        // Check if the brand filter exists in the filter list
+        int filterCount = page.locator(".vertical-filters-label >> text=" + brand).count();
+
+        if (filterCount == 0) {
+            System.out.println("Brand filter '" + brand + "' not found. Skipping further steps.");
+            Assert.fail("Brand not found: " + brand);
+            browser.close();  // Stop execution if the brand filter is not available
+            return;
+        }
+
+        // Apply the brand filter
+        page.locator(".vertical-filters-label >> text=" + brand).nth(0).click();
+
+//        page.locator(".vertical-filters-label >> text="+brand).nth(0).click();
 //        page.waitForTimeout(3000); // Wait for filtering to apply
     }
 
@@ -44,19 +69,23 @@ public class ScraperSteps {
             List<ElementHandle> items = page.querySelectorAll(".product-base");
 
             for (ElementHandle item : items) {
-                String price = item.querySelector(".product-price").innerText();
+                try {
+                    String price = item.querySelector(".product-price").innerText();
 
-                // Extract discount text safely
-                String discountText = item.querySelector(".product-discountPercentage") != null
-                        ? item.querySelector(".product-discountPercentage").innerText()
-                        : "0%";
+                    // Extract discount text safely
+                    String discountText = item.querySelector(".product-discountPercentage") != null
+                            ? item.querySelector(".product-discountPercentage").innerText()
+                            : "0%";
 
-                // Remove non-numeric characters (like brackets and "OFF")
-                String discount = discountText.replaceAll("[^0-9]", "");
+                    // Remove non-numeric characters (like brackets and "OFF")
+                    String discount = discountText.replaceAll("[^0-9]", "");
 
-                String link = "https://www.myntra.com/" + item.querySelector("a").getAttribute("href");
+                    String link = "https://www.myntra.com/" + item.querySelector("a").getAttribute("href");
 
-                tshirtData.add(new TShirt(price, discount, link));
+                    tshirtData.add(new TShirt(price, discount, link));
+                }catch (Exception e) {
+                    System.out.println("Skipping item due to missing data.");
+                }
             }
 
             // Navigate to the next page (if available)
@@ -70,12 +99,20 @@ public class ScraperSteps {
                 }
             }
         }
+        Assert.assertFalse("No T-Shirts found after applying filter!", tshirtData.isEmpty());
+
 
         // Sort by highest discount first
         tshirtData.sort((a, b) -> Integer.compare(
                 Integer.parseInt(b.discount),
                 Integer.parseInt(a.discount)
         ));
+
+        // Assertion: Ensure sorting worked correctly
+        if (tshirtData.size() > 1) {
+            Assert.assertTrue("Sorting failed!",
+                    Integer.parseInt(tshirtData.get(0).discount) >= Integer.parseInt(tshirtData.get(1).discount));
+        }
 
         // Print sorted data
         tshirtData.forEach(System.out::println);
